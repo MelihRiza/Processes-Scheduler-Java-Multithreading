@@ -1,0 +1,134 @@
+=============================================================TEMA2 APD==================================================================
+
+student: Riza Melih
+grupa: 334CD
+
+
+MyDispatcher:
+
+	In functie de tipul de politica de planificare in metoda addTask() din clasa Dispatcher,
+calculez hostul caruia trebuie sa ii trimit task-ul curent. Toate acestea se realizeza intr-un bloc
+synchronized pentru rularea unui singur thread, altfel evit suprascrierea valorilor parametrilor clasei.
+(roundRobinLastSent, minNrTasks, minWorkLeft).
+
+
+	-> ROUND_ROBIN: contorizez ultimul host caruia i-am trimis un task (variabila 
+	'roundRobinLastSent') si trimit urmatorului din coada circulara.
+	
+	-> SHORTEST_QUEUE: printr-o iteratie prin host-uri apeland metoda getQueueSize() a fiecaruia,
+	obtin coada cu numarul minim de task-uri in executie din fiecare host. Apoi trimit 
+	task-ul curent catre hostul cu numarul minim de task-uri dintre toate host-urile.
+	
+	-> SIZE_INTERVAL_TASK_ASSIGNMENT: fiecare tip de task il trimit catre host-ul responsabil
+	cu executia tipului respectiv. (host0 -> short; host1 -> medium; host2-> long).
+	
+	-> LEAST_WORK_LEFT: analog ca la SHORTEST_QUEUE, dar de data aceasta contorizez
+	timpul total ramas pentru executia tuturor task-urilor din coada pentru fiecare task,
+	prin metoda getWorkLeft().
+	
+	
+MyHost:
+
+	Atributele clasei: 
+	
+		lock (Object pe care voi apela metodele de wait() si notify() si care va reprezenta monitorul synchronized)
+
+		running (starea curenta a host-ului, daca este true inseamna ca asteapta sau ruleaza task-uri, daca e false, executia 
+		metodei run() se va incheia)
+
+		gotSubstitute (boolean, devine true in momentul in care se primeste un task care il va substitui pe cel care ruleaza in
+		prezent)
+
+		start_time (ia valoarea curenta in milisecunde a executiei, folosit impreuna cu 'end_time' pentru a contoriza timpul cat
+		a "rulat" task-ul curent in metoda getWorkLeft())
+
+		currentRunningTask (Task, care initial este null si i se atribuie un task in momentul cand acesta trebuie sa ruleze)
+
+		substituteTask (Task, care initial este null si i se atribuie task-ul ce va inlocui task-ul care ruleaza in acest moment)
+
+		queueTasks (coada cu task-urile primite ce urmeaza sa fie rulate, este un PriorityBlockingQueue)
+
+		pausedTasks (coada cu task-urile ce mai au timp de rulat dar au fost inlocuite de task-uri cu prioritate mai mare, este
+		un PriorityBlockingQueue)
+
+
+
+	Metoda run():
+	
+		Executia se realizeaza in bucla while cat timp 'running' este true.
+		In cadrul block-ului synchronized cu monitorul 'lock':
+		
+			Daca 'currentRunningTask' este diferit de null, inseamna ca exista un task ce trebuie rulat 
+			in acest moment. 'start-time' stocheaza timpul inceperii "executiei", iar daca task-ul curent
+			mai are timpi de rulat, voi realiza "rularea" cu metoda wait() ce primeste parametru timpul
+			ramas de rulat al task-ului, adica thread-ul va astepta maxim cat timp mai are de rulat task-ul.
+			Thread-ul poate fi oprit din asteptare daca s-a primit un task care ii va lua locul, caz in se
+			care primeste un notify() de la metoda addTask() (explicat mai jos), si wait() se termina inainte
+			de limita lui de timp.
+			
+			Daca 'gotSubstitute' este true, inseamna ca s-a primit un task care va intra in executie si il va pune pe
+			cel curent in asteptare, avand prioritate mai mare.
+			Deci setez timpul ramas al task-ului curent de executat, il adaug in coada 'pausedTasks', 
+			inlocuiesc 'currentRunningTask' cu 'substituteTask' si 'gotSubstitute' devine false, pentru a nu intra
+			iar la urmatorul loop inutil si gresit in acest if (fara a primi defapt un alt substitute pentru 
+			substitute-ul curent). continue.
+			
+			Altfel, inseamna ca wait()-ul precendent nu a fost intrerupt si thread-ul a asteptat pentru fix
+			timpul de rulare al task-ului curent, deci task-ul si-a rulat timpul necesar si acesta trebuie sa se termine.
+			Apelez currentRunningTask.finish().
+			
+			In continuare, daca exista task-uri in queueTasks sau in pausedTasks, trebuie sa aleg urmatorul task care va
+			rula in continuare cu metoda getNextTask().
+			Daca nu exista task-uri in aceste 2 cozi, voi seta valoare 'currentRunningTask' la null. Fapt ce va face ca
+			in urmatorul loop task-ul sa intre pe else si thread-ul va astepta la lock.wait() un timp nedefinit,
+			pana cand un lucru din cele 2 se poate intampla:
+				
+				-> Daca primeste notify din addTask inseamna ca a fost adaugat task in queueTask si 'currentRunningTask'
+				va lua valoarea acelui task, si se va continua executia. (ce am spus mai sus).
+				
+				-> Daca in schimb primeste notify din shutdown(), va verifica queue.isEmpty(), acesta va fi gol, 
+				metoda shutdown() a setat running = false, deci nu se va mai intra in while si se va termina
+				executia metodei run().
+				
+				
+	Metoda getNextTask():
+	
+		Primeste ca parametrii queueTasks, pausedTasks si lastRanTask (ultimul task care a rulat).
+		
+		Din queueTasks obtin task-ul care are cea mai mare prioritate, si index-ul lui din queueTasks.
+		Apoi din pausedTasks obtin task-ul care are cea mai mare prioritate, prioritate cel putin egala
+		cu prioritatea task-ului ales din queueTasks. 
+		Daca am gasit un task in pausedTasks, acesta va fi urmatorul de executat, metoda il va returna.
+		Altfel inseamna ca urmtorul de executat este task-ul cu cea mai mare prioritate din queueTasks si
+		il returnez.
+		
+		
+	Metoda addTask():
+	
+		In block-ul synchronized;
+			
+			Daca exista un task curent care este rulat, este preemptabil si task-ul primit are o prioritate mai
+			mare decat cel care este rulat, inseamna ca noul task va trebui sa ii ia locul, astfel apelez notify()
+			pentru a trezi thread-ul care astepta pentru currentRunningTask.getLeft() milisecunde,
+			setez gotSubstitute = true si substituteTask cu task-ul nou primit, termin executia addTask().
+			
+			Altfel, adaug in queueTasks task-ul curent si daca currentRunningTask este null apelez notify()
+			pentru a opri thread-ul ce executa run() din asteptare.
+
+		
+		
+	Metoda getQueueSize():
+	
+		Intoarce numarul de task-uri totale ce se afla in coada si care sunt rulate:
+		queueTasks.size() + pausedTasks.size() + 1 (daca currentRunningTask != null) + 1 (daca substituteTask != null).
+		
+	
+	Metoda getWorkLeft():
+	
+		Intoarce numarul total de milisecunde ramase pentru a executa toate task-urile.
+		Aici ma folosesc de start_time pentru a afla cat timp mai are de rulat task-ul care se afla acum in procesul de 
+		rulare: workLeft += currentRunningTask.getDuration() - (end_time - start_time);
+		Apoi timpul total il "rotunjesc" la cea mai apropiata secunda si returnez aceasta valoare.
+
+
+
